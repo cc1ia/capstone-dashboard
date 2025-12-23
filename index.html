@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTM Smart Aquaculture Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* --- Header --- */
+        .header-container {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 20px;
+        }
+        
+        /* LOGO STYLE */
+        .logo-img {
+            height: 100px;
+            background-color: rgba(255, 255, 255, 0.95); 
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+        }
+
+        .logo-text {
+            color: #f39c12; 
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 3px;
+            margin-bottom: 5px;
+        }
+        h1 { margin: 10px 0 0 0; color: #ffffff; font-size: 1.8rem; }
+        .subtitle { color: #888; font-size: 0.9rem; margin-top: 5px;}
+
+        /* --- Layout Grid --- */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* Two Columns */
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* --- Cards --- */
+        .card {
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border: 1px solid #333;
+            text-align: left;
+        }
+        
+        /* Full width card for Quality Graph */
+        .card-full {
+            grid-column: span 2;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        .card-title { font-size: 1.2rem; font-weight: bold; color: #ddd; }
+        .live-value { font-size: 1.5rem; font-weight: bold; color: #fff; }
+
+        /* --- Pump Status Indicators --- */
+        .pump-card { text-align: center; }
+        .status-indicator {
+            font-size: 2rem;
+            font-weight: bold;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 10px;
+            transition: all 0.3s;
+            text-transform: uppercase;
+        }
+        .status-working {
+            background: rgba(35, 196, 142, 0.2);
+            color: #23C48E;
+            border: 2px solid #23C48E;
+            box-shadow: 0 0 15px rgba(35, 196, 142, 0.3);
+        }
+        .status-stopped {
+            background: rgba(211, 67, 92, 0.2);
+            color: #D3435C;
+            border: 2px solid #D3435C;
+            box-shadow: 0 0 15px rgba(211, 67, 92, 0.3);
+        }
+
+        /* --- Chart Container --- */
+        .chart-wrapper {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .card-full { grid-column: span 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-container">
+        <img class="logo-img" src="logo.png.png" alt="UTM Logo">
+        
+        <h1>AQUACULTURE MONITORING SYSTEM</h1>
+        <div class="subtitle">Real-time Data Stream via Blynk IoT Cloud</div>
+    </div>
+
+    <div class="dashboard-grid">
+        
+        <div class="card pump-card">
+            <div class="card-title">MAIN PUMP STATUS</div>
+            <div id="mainStatus" class="status-indicator">LOADING...</div>
+        </div>
+
+        <div class="card pump-card">
+            <div class="card-title">SPARE PUMP STATUS</div>
+            <div id="spareStatus" class="status-indicator">LOADING...</div>
+        </div>
+
+        <div class="card card-full">
+            <div class="card-header">
+                <span class="card-title" style="color: #9b59b6;">OVERALL WATER QUALITY SCORE</span>
+                <span id="qualityValue" class="live-value">-- %</span>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="qualityChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title" style="color: #f1c40f;">pH LEVEL</span>
+                <span id="phValue" class="live-value">--</span>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="phChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title" style="color: #3498db;">TURBIDITY (NTU)</span>
+                <span id="turbValue" class="live-value">-- NTU</span>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="turbChart"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ================= CONFIGURATION =================
+        const AUTH_TOKEN = "kn5NDgALMvxqxY1yausCfkAk5yfLSMtI"; // Your Token
+        
+        const PINS = {
+            PH: "V0",        
+            TURBIDITY: "V1", 
+            MAIN_PUMP: "V2", 
+            SPARE_PUMP: "V3" 
+        };
+
+        // Chart Objects
+        let phChart, turbChart, qualityChart;
+        const MAX_POINTS = 30; // 30 Seconds history
+
+        // ================= CHART SETUP =================
+        function initCharts() {
+            // pH Chart
+            const ctxPH = document.getElementById('phChart').getContext('2d');
+            phChart = new Chart(ctxPH, createChartConfig('pH Level', '#f1c40f', 0, 14));
+
+            // Turbidity Chart
+            const ctxTurb = document.getElementById('turbChart').getContext('2d');
+            turbChart = new Chart(ctxTurb, createChartConfig('Turbidity', '#3498db', 0, 1000));
+
+            // Quality Chart (New)
+            const ctxQual = document.getElementById('qualityChart').getContext('2d');
+            qualityChart = new Chart(ctxQual, createChartConfig('Health Score (%)', '#9b59b6', 0, 100));
+        }
+
+        function createChartConfig(label, color, min, max) {
+            return {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        borderColor: color,
+                        backgroundColor: color + '20', // Transparency
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4, 
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { display: false },
+                        y: {
+                            min: min,
+                            max: max,
+                            grid: { color: '#333' },
+                            ticks: { color: '#888' }
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            };
+        }
+
+        function updateChart(chart, value) {
+            const now = new Date().toLocaleTimeString();
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(value);
+            if (chart.data.labels.length > MAX_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update();
+        }
+
+        // ================= CALCULATE QUALITY SCORE =================
+        function calculateWaterQuality(pH, ntu) {
+            // 1. pH Score: Perfect is 7.0. Lose points if far from 7.
+            // Formula: Lose 25 points for every 1.0 deviation.
+            let phDiff = Math.abs(pH - 7.0);
+            let phScore = Math.max(0, 100 - (phDiff * 25));
+
+            // 2. Turbidity Score: Perfect is 0. Lose points as it gets dirty.
+            // Formula: Lose 1 point for every 5 NTU. (500 NTU = 0 score)
+            let turbScore = Math.max(0, 100 - (ntu / 5));
+
+            // 3. Final Average
+            return (phScore + turbScore) / 2;
+        }
+
+        // ================= DATA FETCHING =================
+        async function fetchData() {
+            try {
+                const urls = [
+                    `https://blynk.cloud/external/api/get?token=${AUTH_TOKEN}&${PINS.PH}`,
+                    `https://blynk.cloud/external/api/get?token=${AUTH_TOKEN}&${PINS.TURBIDITY}`,
+                    `https://blynk.cloud/external/api/get?token=${AUTH_TOKEN}&${PINS.MAIN_PUMP}`,
+                    `https://blynk.cloud/external/api/get?token=${AUTH_TOKEN}&${PINS.SPARE_PUMP}`
+                ];
+
+                const responses = await Promise.all(urls.map(url => fetch(url)));
+                const data = await Promise.all(responses.map(res => res.text()));
+
+                // 1. Update pH
+                const phVal = parseFloat(data[0]);
+                document.getElementById('phValue').innerText = phVal.toFixed(1);
+                updateChart(phChart, phVal);
+
+                // 2. Update Turbidity
+                const turbVal = parseInt(data[1]);
+                document.getElementById('turbValue').innerText = turbVal + " NTU";
+                updateChart(turbChart, turbVal);
+
+                // 3. Calculate & Update Quality Score
+                const qualityScore = calculateWaterQuality(phVal, turbVal);
+                document.getElementById('qualityValue').innerText = qualityScore.toFixed(0) + " %";
+                updateChart(qualityChart, qualityScore);
+
+                // Change color of Quality Text based on score
+                const qualText = document.getElementById('qualityValue');
+                if(qualityScore > 80) qualText.style.color = "#23C48E"; // Green
+                else if(qualityScore > 50) qualText.style.color = "#f1c40f"; // Yellow
+                else qualText.style.color = "#D3435C"; // Red
+
+                // 4. Update Pumps
+                updatePumpStatus("mainStatus", data[2]);
+                updatePumpStatus("spareStatus", data[3]);
+
+            } catch (error) {
+                console.error("Blynk API Error:", error);
+            }
+        }
+
+        function updatePumpStatus(elementId, statusStr) {
+            const el = document.getElementById(elementId);
+            const cleanStatus = statusStr.replace(/"/g, ''); 
+            el.innerText = cleanStatus;
+            el.className = "status-indicator"; 
+            if (cleanStatus.includes("WORKING")) {
+                el.classList.add("status-working");
+            } else {
+                el.classList.add("status-stopped");
+            }
+        }
+
+        // ================= MAIN LOOP =================
+        initCharts();
+        setInterval(fetchData, 1000); 
+        fetchData(); 
+
+    </script>
+</body>
+</html>
